@@ -1,4 +1,4 @@
-﻿using SneakerShop.Models;
+using SneakerShop.Models;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -26,6 +26,9 @@ namespace SneakerShop.Forms
             // Enable scrolling for the form itself
             this.AutoScroll = true;
             this.AutoScrollMinSize = new Size(800, 600);
+
+            // Handle DataGridView errors
+            dgvInventory.DataError += dgvInventory_DataError;
         }
 
         private async void InventoryForm_Load(object sender, EventArgs e)
@@ -35,8 +38,15 @@ namespace SneakerShop.Forms
             SetupDataGridView();
             ResetForm();
 
-            // ADD THIS LINE to connect the formatting event
+            // Connect the formatting event
             dgvInventory.CellFormatting += dgvInventory_CellFormatting;
+        }
+
+        // Handle DataGridView errors silently
+        private void dgvInventory_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+            Console.WriteLine($"DataGridView Error: {e.Exception.Message}");
         }
 
         private async Task LoadBrandsAsync()
@@ -64,19 +74,16 @@ namespace SneakerShop.Forms
                 var response = await SupabaseClient.Client.From<Sneaker>().Get();
                 var sneakerList = response.Models.ToList();
 
-                // FIX DISPLAY IDs FOR EXISTING PRODUCTS THAT HAVE 0
-                foreach (var sneaker in sneakerList.Where(s => s.DisplayId == 0))
-                {
-                    sneaker.DisplayId = sneakerList.IndexOf(sneaker) + 1;
-                }
+                // FIX DUPLICATE DISPLAY IDs - COMPLETELY REBUILD THEM
+                FixDuplicateDisplayIds(sneakerList);
 
-                // MANUALLY SORT BY DISPLAYID
+                // Sort by the corrected DisplayId
                 sneakerList = sneakerList.OrderBy(s => s.DisplayId).ToList();
 
                 sneakers = new BindingList<Sneaker>(sneakerList);
 
-                dgvInventory.DataSource = null; // Clear first
-                dgvInventory.DataSource = sneakers; // Re-bind
+                dgvInventory.DataSource = null;
+                dgvInventory.DataSource = sneakers;
 
                 UpdateStockSummary();
             }
@@ -86,12 +93,73 @@ namespace SneakerShop.Forms
             }
         }
 
+        // NEW METHOD: Fix duplicate DisplayIds and ensure sequential numbering
+        private void FixDuplicateDisplayIds(List<Sneaker> sneakerList)
+        {
+            // Group by DisplayId to find duplicates
+            var duplicateGroups = sneakerList
+                .GroupBy(s => s.DisplayId)
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            // If no duplicates, just ensure we don't have 0 values
+            if (!duplicateGroups.Any())
+            {
+                foreach (var sneaker in sneakerList.Where(s => s.DisplayId == 0))
+                {
+                    sneaker.DisplayId = sneakerList.IndexOf(sneaker) + 1;
+                }
+                return;
+            }
+
+            // FIX DUPLICATES: Reassign all DisplayIds sequentially
+            int newId = 1;
+            foreach (var sneaker in sneakerList.OrderBy(s => s.DisplayId).ThenBy(s => s.CreatedAt))
+            {
+                sneaker.DisplayId = newId++;
+            }
+
+            // Save the changes back to database for duplicates
+            _ = SaveFixedDisplayIds(sneakerList);
+        }
+
+        // NEW METHOD: Save fixed DisplayIds to database
+        private async Task SaveFixedDisplayIds(List<Sneaker> sneakerList)
+        {
+            try
+            {
+                foreach (var sneaker in sneakerList)
+                {
+                    await SupabaseClient.Client.From<Sneaker>()
+                        .Where(s => s.Id == sneaker.Id)
+                        .Set(s => s.DisplayId, sneaker.DisplayId)
+                        .Update();
+                }
+                Console.WriteLine("Fixed duplicate DisplayIds in database");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not save fixed DisplayIds: {ex.Message}");
+                // Continue anyway - the fix will persist in memory
+            }
+        }
+
+        // NEW METHOD: Get next available DisplayId (no duplicates)
+        private int GetNextDisplayId()
+        {
+            if (sneakers.Count == 0) return 1;
+
+            // Find the highest current DisplayId and add 1
+            int maxId = sneakers.Max(s => s.DisplayId);
+            return maxId + 1;
+        }
+
         private void SetupDataGridView()
         {
             dgvInventory.AutoGenerateColumns = false;
             dgvInventory.Columns.Clear();
 
-            // Show DisplayId instead of Id - CHANGED THIS COLUMN
+            // Product ID
             dgvInventory.Columns.Add(new DataGridViewTextBoxColumn()
             {
                 Name = "colDisplayId",
@@ -109,7 +177,7 @@ namespace SneakerShop.Forms
                 Width = 200
             });
 
-            // FIXED: Show Brand Name instead of BrandId
+            // Brand Name
             dgvInventory.Columns.Add(new DataGridViewTextBoxColumn()
             {
                 Name = "colBrand",
@@ -133,13 +201,22 @@ namespace SneakerShop.Forms
                 Width = 100
             });
 
+            // Cost Price
             dgvInventory.Columns.Add(new DataGridViewTextBoxColumn()
             {
                 Name = "colPrice",
                 DataPropertyName = "Price",
-                HeaderText = "Price",
-                Width = 100,
-                DefaultCellStyle = new DataGridViewCellStyle() { Format = "C2" }
+                HeaderText = "Cost Price",
+                Width = 100
+            });
+
+            // Selling Price
+            dgvInventory.Columns.Add(new DataGridViewTextBoxColumn()
+            {
+                Name = "colSalePrice",
+                DataPropertyName = "SalePrice",
+                HeaderText = "Selling Price",
+                Width = 100
             });
 
             dgvInventory.Columns.Add(new DataGridViewTextBoxColumn()
@@ -150,7 +227,7 @@ namespace SneakerShop.Forms
                 Width = 80
             });
 
-            // FIXED: Status column that actually shows data
+            // Status column
             var statusColumn = new DataGridViewTextBoxColumn()
             {
                 Name = "colStatus",
@@ -176,9 +253,67 @@ namespace SneakerShop.Forms
                             e.Value = brand.BrandName;
                             e.FormattingApplied = true;
                         }
+                        else
+                        {
+                            e.Value = "Unknown Brand";
+                            e.FormattingApplied = true;
+                        }
                     }
 
-                    // Handle Status column - FIXED THIS PART
+                    // Handle Cost Price column
+                    else if (dgvInventory.Columns[e.ColumnIndex].Name == "colPrice")
+                    {
+                        try
+                        {
+                            e.Value = sneaker.Price.ToString("C2");
+                            e.FormattingApplied = true;
+                        }
+                        catch
+                        {
+                            e.Value = "Invalid Price";
+                            e.FormattingApplied = true;
+                        }
+                    }
+
+                    // Handle Sale Price column
+                    else if (dgvInventory.Columns[e.ColumnIndex].Name == "colSalePrice")
+                    {
+                        try
+                        {
+                            if (sneaker.SalePrice.HasValue && sneaker.SalePrice.Value > 0)
+                            {
+                                e.Value = sneaker.SalePrice.Value.ToString("C2");
+                                // Highlight profit/loss
+                                if (sneaker.SalePrice.Value > sneaker.Price)
+                                {
+                                    e.CellStyle.ForeColor = Color.Green;
+                                    e.CellStyle.Font = new Font(e.CellStyle.Font, FontStyle.Bold);
+                                }
+                                else if (sneaker.SalePrice.Value < sneaker.Price)
+                                {
+                                    e.CellStyle.ForeColor = Color.Red;
+                                    e.CellStyle.Font = new Font(e.CellStyle.Font, FontStyle.Bold);
+                                }
+                                else
+                                {
+                                    e.CellStyle.ForeColor = Color.Black;
+                                }
+                            }
+                            else
+                            {
+                                e.Value = sneaker.Price.ToString("C2");
+                                e.CellStyle.ForeColor = Color.Gray;
+                            }
+                            e.FormattingApplied = true;
+                        }
+                        catch
+                        {
+                            e.Value = "Invalid Price";
+                            e.FormattingApplied = true;
+                        }
+                    }
+
+                    // Handle Status column
                     else if (dgvInventory.Columns[e.ColumnIndex].Name == "colStatus")
                     {
                         if (sneaker.StockQuantity == 0)
@@ -207,8 +342,8 @@ namespace SneakerShop.Forms
 
         private void ResetForm()
         {
-            // Calculate next available DisplayId
-            int nextId = sneakers.Count > 0 ? sneakers.Max(s => s.DisplayId) + 1 : 1;
+            // Use the new method to get next ID (no duplicates)
+            int nextId = GetNextDisplayId();
 
             // Reset all form controls
             txtProductsID.Text = nextId.ToString();
@@ -216,6 +351,7 @@ namespace SneakerShop.Forms
             txtSize.Text = "";
             txtColor.Text = "";
             txtPrice.Text = "";
+            txtSalePrice.Text = "";
             numericUpDown1.Value = 0;
             cmbBrand.SelectedIndex = -1;
 
@@ -284,6 +420,13 @@ namespace SneakerShop.Forms
                     brandId = cmbBrand.SelectedValue.ToString();
                 }
 
+                // Handle sale price
+                decimal? salePrice = null;
+                if (!string.IsNullOrWhiteSpace(txtSalePrice.Text) && decimal.TryParse(txtSalePrice.Text, out decimal parsedSalePrice))
+                {
+                    salePrice = parsedSalePrice;
+                }
+
                 if (isEditing && currentSneaker != null)
                 {
                     // Update the existing object directly
@@ -292,9 +435,9 @@ namespace SneakerShop.Forms
                     currentSneaker.Size = txtSize.Text;
                     currentSneaker.Color = txtColor.Text;
                     currentSneaker.Price = decimal.Parse(txtPrice.Text);
+                    currentSneaker.SalePrice = salePrice;
                     currentSneaker.StockQuantity = stockQuantity;
 
-                    // Simple update - FIXED DATABASE ERROR
                     await SupabaseClient.Client.From<Sneaker>()
                         .Where(s => s.Id == currentSneaker.Id)
                         .Update(currentSneaker);
@@ -312,6 +455,7 @@ namespace SneakerShop.Forms
                         Size = txtSize.Text,
                         Color = txtColor.Text,
                         Price = decimal.Parse(txtPrice.Text),
+                        SalePrice = salePrice,
                         StockQuantity = stockQuantity
                     };
 
@@ -347,6 +491,7 @@ namespace SneakerShop.Forms
                 txtSize.Text = selectedSneaker.Size;
                 txtColor.Text = selectedSneaker.Color;
                 txtPrice.Text = selectedSneaker.Price.ToString("F2");
+                txtSalePrice.Text = selectedSneaker.SalePrice?.ToString("F2") ?? "";
                 numericUpDown1.Value = selectedSneaker.StockQuantity;
 
                 // Set brand
@@ -400,12 +545,16 @@ namespace SneakerShop.Forms
                 {
                     using (System.IO.StreamWriter writer = new System.IO.StreamWriter(saveFileDialog.FileName))
                     {
-                        writer.WriteLine("ProductID,ProductName,Brand,Size,Color,Price,Stock,Status");
+                        writer.WriteLine("ProductID,ProductName,Brand,Size,Color,CostPrice,SellingPrice,Stock,Status");
                         foreach (Sneaker sneaker in sneakers)
                         {
                             string status = sneaker.StockQuantity == 0 ? "Out of Stock" :
                                           sneaker.StockQuantity < 10 ? "Low Stock" : "In Stock";
-                            writer.WriteLine($"\"{sneaker.Id}\",\"{sneaker.Name}\",\"{sneaker.BrandId}\",\"{sneaker.Size}\",\"{sneaker.Color}\",{sneaker.Price},{sneaker.StockQuantity},\"{status}\"");
+                            string sellingPrice = sneaker.SalePrice.HasValue ? sneaker.SalePrice.Value.ToString("F2") : sneaker.Price.ToString("F2");
+
+                            writer.WriteLine($"\"{sneaker.Id}\",\"{sneaker.Name}\",\"{sneaker.BrandId}\",\"{sneaker.Size}\",\"{sneaker.Color}\"," +
+                                            $"{sneaker.Price},{sellingPrice}," +
+                                            $"{sneaker.StockQuantity},\"{status}\"");
                         }
                     }
                     MessageBox.Show("Inventory exported successfully!", "Success");
@@ -475,9 +624,20 @@ namespace SneakerShop.Forms
 
             if (!decimal.TryParse(txtPrice.Text, out decimal price) || price <= 0)
             {
-                MessageBox.Show("Please enter a valid price greater than 0.", "Validation Error");
+                MessageBox.Show("Please enter a valid cost price greater than 0.", "Validation Error");
                 txtPrice.Focus();
                 return false;
+            }
+
+            // Sale Price validation
+            if (!string.IsNullOrWhiteSpace(txtSalePrice.Text))
+            {
+                if (!decimal.TryParse(txtSalePrice.Text, out decimal salePrice) || salePrice < 0)
+                {
+                    MessageBox.Show("Please enter a valid selling price (0 or greater) or leave empty.", "Validation Error");
+                    txtSalePrice.Focus();
+                    return false;
+                }
             }
 
             if (cmbBrand.SelectedIndex == -1)
@@ -515,5 +675,10 @@ namespace SneakerShop.Forms
         private void panel2_Paint(object sender, PaintEventArgs e) { }
         private void lblInventoryList_Click(object sender, EventArgs e) { }
         private void btnClose_Click(object sender, EventArgs e) { this.Close(); }
+
+        private void dgvInventory_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+        }
     }
 }
