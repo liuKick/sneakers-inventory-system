@@ -1,4 +1,4 @@
-﻿using SneakerShop.Models;
+using SneakerShop.Models;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -115,7 +115,9 @@ namespace SneakerShop.Forms
                 cmbSneakers.Items.Clear();
                 foreach (var sneaker in sneakers)
                 {
-                    cmbSneakers.Items.Add($"{sneaker.Name} - Size {sneaker.Size} - ${sneaker.Price}");
+                    // ✅ FIXED: Use SalePrice instead of Price
+                    decimal displayPrice = sneaker.SalePrice ?? sneaker.Price;
+                    cmbSneakers.Items.Add($"{sneaker.Name} - Size {sneaker.Size} - ${displayPrice}");
                 }
             }
             catch (Exception ex)
@@ -160,7 +162,9 @@ namespace SneakerShop.Forms
             if (selectedIndex >= 0 && selectedIndex < sneakers.Count)
             {
                 var selectedSneaker = sneakers[selectedIndex];
-                txtUnitPrice.Text = selectedSneaker.Price.ToString("C");
+                // ✅ FIXED: Use SalePrice instead of Price
+                decimal unitPrice = selectedSneaker.SalePrice ?? selectedSneaker.Price;
+                txtUnitPrice.Text = unitPrice.ToString("C");
                 CalculateSubTotal();
             }
         }
@@ -176,7 +180,9 @@ namespace SneakerShop.Forms
             if (selectedIndex >= 0 && selectedIndex < sneakers.Count && numQuantity.Value > 0)
             {
                 var selectedSneaker = sneakers[selectedIndex];
-                decimal subTotal = selectedSneaker.Price * (int)numQuantity.Value;
+                // ✅ FIXED: Use SalePrice instead of Price
+                decimal unitPrice = selectedSneaker.SalePrice ?? selectedSneaker.Price;
+                decimal subTotal = unitPrice * (int)numQuantity.Value;
                 txtSubTotal.Text = subTotal.ToString("C");
 
                 if (numQuantity.Value > selectedSneaker.StockQuantity)
@@ -206,6 +212,9 @@ namespace SneakerShop.Forms
                 var selectedSneaker = sneakers[selectedIndex];
                 int quantity = (int)numQuantity.Value;
 
+                // ✅ FIXED: Use SalePrice instead of Price
+                decimal unitPrice = selectedSneaker.SalePrice ?? selectedSneaker.Price;
+
                 if (quantity > selectedSneaker.StockQuantity)
                 {
                     MessageBox.Show($"Only {selectedSneaker.StockQuantity} items available in stock.");
@@ -216,7 +225,7 @@ namespace SneakerShop.Forms
                 if (existingItem != null)
                 {
                     existingItem.Quantity += quantity;
-                    totalAmount += selectedSneaker.Price * quantity;
+                    totalAmount += unitPrice * quantity; // ✅ FIXED: Use unitPrice
                 }
                 else
                 {
@@ -224,7 +233,7 @@ namespace SneakerShop.Forms
                     {
                         SneakerId = selectedSneaker.Id,
                         ProductName = $"{selectedSneaker.Name} - Size {selectedSneaker.Size}",
-                        UnitPrice = selectedSneaker.Price,
+                        UnitPrice = unitPrice, // ✅ FIXED: Use unitPrice
                         Quantity = quantity
                     };
                     cart.Add(item);
