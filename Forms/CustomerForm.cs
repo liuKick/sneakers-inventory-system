@@ -1,4 +1,4 @@
-﻿using SneakerShop.Models;
+using SneakerShop.Models;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -156,6 +156,40 @@ namespace SneakerShop.Forms
             UpdatePurchaseSummary(0, 0);
         }
 
+        // ✅ ADDED: COMPLETE REFRESH METHOD
+        private async void RefreshForm()
+        {
+            try
+            {
+                // 1. Clear all data and reset form
+                ResetForm();
+
+                // 2. Clear selection in DataGridView
+                dgvCustomers.ClearSelection();
+                dgvPurchaseHistory.DataSource = null;
+
+                // 3. Reset search
+                txtSearch.Clear();
+
+                // 4. Reload customers from database
+                await LoadCustomersAsync();
+
+                // 5. Reset purchase history display
+                lblPurchaseHistoryTitle.Text = "PURCHASE HISTORY - Select a customer";
+                UpdatePurchaseSummary(0, 0);
+
+                // 6. Force UI refresh
+                this.Refresh();
+
+                MessageBox.Show("Form refreshed successfully!", "Refresh",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error refreshing form: {ex.Message}", "Error");
+            }
+        }
+
         private void UpdatePurchaseSummary(int totalPurchases, decimal totalSpent)
         {
             lblPurchaseSummary.Text = $"Total Purchases: {totalPurchases} | Total Spent: ${totalSpent:F2}";
@@ -255,9 +289,10 @@ namespace SneakerShop.Forms
             dgvCustomers.DataSource = new BindingList<Customer>(filtered);
         }
 
+        // ✅ FIXED: REFRESH BUTTON - COMPLETE FORM RESET
         private async void btnRefresh_Click(object sender, EventArgs e)
         {
-            await LoadCustomersAsync();
+            RefreshForm();
         }
 
         private async void btnViewPurchaseHistory_Click(object sender, EventArgs e)
@@ -282,6 +317,9 @@ namespace SneakerShop.Forms
         {
             try
             {
+                // Clear previous data first
+                dgvPurchaseHistory.DataSource = null;
+
                 // Get all sales for this customer
                 var salesResponse = await SupabaseClient.Client.From<Sale>()
                     .Where(s => s.CustomerId == customerId)
