@@ -1,4 +1,4 @@
-﻿using SneakerShop.Models;
+using SneakerShop.Models;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -40,7 +40,7 @@ namespace SneakerShop.Forms
                 if (chckAdmin.Checked) chckStaff.Checked = false;
             };
 
-            // ⭐⭐⭐ ADD STATUS CHECKBOX LOGIC ⭐⭐⭐
+            // Status checkbox logic
             chckActive.CheckedChanged += (s, e) => {
                 if (chckActive.Checked) chckInactive.Checked = false;
             };
@@ -49,7 +49,7 @@ namespace SneakerShop.Forms
                 if (chckInactive.Checked) chckActive.Checked = false;
             };
 
-            // ⭐⭐⭐ MAKE STATUS CHECKBOXES VISIBLE ⭐⭐⭐
+            // Make status checkboxes visible
             chckActive.Visible = true;
             chckInactive.Visible = true;
         }
@@ -78,7 +78,7 @@ namespace SneakerShop.Forms
 
                 ResetForm();
 
-                // Show debug info
+                // Show debug info (optional - you can remove this)
                 if (staffList.Count > 0)
                 {
                     MessageBox.Show($"Successfully loaded {staffList.Count} staff members!", "Info",
@@ -111,7 +111,7 @@ namespace SneakerShop.Forms
                 Width = 100
             });
 
-            // ⭐⭐⭐ ADD STATUS COLUMN ⭐⭐⭐
+            // Add Status column
             dgvStaff.Columns.Add(new DataGridViewTextBoxColumn()
             {
                 DataPropertyName = "Status",
@@ -127,7 +127,7 @@ namespace SneakerShop.Forms
             chckStaff.Checked = true;
             chckAdmin.Checked = false;
 
-            // ⭐⭐⭐ ADD STATUS DEFAULT ⭐⭐⭐
+            // Add status default
             chckActive.Checked = true;
             chckInactive.Checked = false;
 
@@ -162,11 +162,11 @@ namespace SneakerShop.Forms
             {
                 if (isEditing && currentStaff != null)
                 {
-                    // Update existing staff - ONLY save essential fields
+                    // Update existing staff
                     currentStaff.Username = txtUsername.Text.Trim();
                     currentStaff.Role = chckAdmin.Checked ? "admin" : "staff";
 
-                    // ⭐⭐⭐ ADD STATUS SAVING ⭐⭐⭐
+                    // Add status saving
                     currentStaff.Status = chckActive.Checked ? "Active" : "Inactive";
 
                     var success = await dbService.UpdateUser(currentStaff);
@@ -179,7 +179,7 @@ namespace SneakerShop.Forms
                 }
                 else
                 {
-                    // Add new staff - ONLY save essential fields
+                    // Add new staff - ✅ FIXED: Use proper BCrypt hashing
                     var usernameExists = await dbService.UsernameExists(txtUsername.Text.Trim());
                     if (usernameExists)
                     {
@@ -191,10 +191,8 @@ namespace SneakerShop.Forms
                     var newStaff = new User
                     {
                         Username = txtUsername.Text.Trim(),
-                        Password = DatabaseService.HashPassword(txtGeneratePass.Text),
+                        Password = DatabaseService.HashPassword(txtGeneratePass.Text), // ✅ FIXED: Use BCrypt hashing
                         Role = chckAdmin.Checked ? "admin" : "staff",
-
-                        // ⭐⭐⭐ ADD STATUS SAVING ⭐⭐⭐
                         Status = chckActive.Checked ? "Active" : "Inactive"
                     };
 
@@ -226,7 +224,7 @@ namespace SneakerShop.Forms
                 chckAdmin.Checked = selectedStaff.Role == "admin";
                 chckStaff.Checked = selectedStaff.Role == "staff";
 
-                // ⭐⭐⭐ ADD STATUS LOADING ⭐⭐⭐
+                // Add status loading
                 chckActive.Checked = selectedStaff.Status == "Active";
                 chckInactive.Checked = selectedStaff.Status == "Inactive";
             }
@@ -290,7 +288,7 @@ namespace SneakerShop.Forms
                 var filteredList = new BindingList<User>(staffList.Where(s =>
                     s.Username.ToLower().Contains(searchText) ||
                     s.Role.ToLower().Contains(searchText) ||
-                    s.Status.ToLower().Contains(searchText) // ⭐⭐⭐ ADD STATUS TO SEARCH ⭐⭐⭐
+                    s.Status.ToLower().Contains(searchText)
                 ).ToList());
                 dgvStaff.DataSource = filteredList;
             }
