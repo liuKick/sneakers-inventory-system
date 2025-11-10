@@ -74,10 +74,7 @@ namespace SneakerShop.Forms
                 var response = await SupabaseClient.Client.From<Sneaker>().Get();
                 var sneakerList = response.Models.ToList();
 
-                // FIX DUPLICATE DISPLAY IDs - COMPLETELY REBUILD THEM
-                FixDuplicateDisplayIds(sneakerList);
-
-                // Sort by the corrected DisplayId
+                // SIMPLE FIX: Just sort by DisplayId
                 sneakerList = sneakerList.OrderBy(s => s.DisplayId).ToList();
 
                 sneakers = new BindingList<Sneaker>(sneakerList);
@@ -93,54 +90,36 @@ namespace SneakerShop.Forms
             }
         }
 
-        // NEW METHOD: Fix duplicate DisplayIds and ensure sequential numbering
-        private void FixDuplicateDisplayIds(List<Sneaker> sneakerList)
-        {
-            // Group by DisplayId to find duplicates
-            var duplicateGroups = sneakerList
-                .GroupBy(s => s.DisplayId)
-                .Where(g => g.Count() > 1)
-                .ToList();
-
-            // If no duplicates, just ensure we don't have 0 values
-            if (!duplicateGroups.Any())
-            {
-                foreach (var sneaker in sneakerList.Where(s => s.DisplayId == 0))
-                {
-                    sneaker.DisplayId = sneakerList.IndexOf(sneaker) + 1;
-                }
-                return;
-            }
-
-            // FIX DUPLICATES: Reassign all DisplayIds sequentially
-            int newId = 1;
-            foreach (var sneaker in sneakerList.OrderBy(s => s.DisplayId).ThenBy(s => s.CreatedAt))
-            {
-                sneaker.DisplayId = newId++;
-            }
-
-            // Save the changes back to database for duplicates
-            _ = SaveFixedDisplayIds(sneakerList);
-        }
-
-        // NEW METHOD: Save fixed DisplayIds to database
-        private async Task SaveFixedDisplayIds(List<Sneaker> sneakerList)
+        // ✅ SIMPLE & RELIABLE: Reorder all DisplayIds after deletion
+        private async Task ReorderDisplayIdsAfterDeletion()
         {
             try
             {
-                foreach (var sneaker in sneakerList)
+                // Get all remaining sneakers ordered by current DisplayId
+                var response = await SupabaseClient.Client.From<Sneaker>().Get();
+                var allSneakers = response.Models.OrderBy(s => s.DisplayId).ToList();
+
+                // SIMPLE: Just reassign 1, 2, 3, 4... to all items
+                int newDisplayId = 1;
+                foreach (var sneaker in allSneakers)
+                {
+                    sneaker.DisplayId = newDisplayId++;
+                }
+
+                // Save the new order to database
+                foreach (var sneaker in allSneakers)
                 {
                     await SupabaseClient.Client.From<Sneaker>()
                         .Where(s => s.Id == sneaker.Id)
                         .Set(s => s.DisplayId, sneaker.DisplayId)
                         .Update();
                 }
-                Console.WriteLine("Fixed duplicate DisplayIds in database");
+
+                Console.WriteLine($"✅ Reordered {allSneakers.Count} products to: {string.Join(", ", allSneakers.Select(s => s.DisplayId))}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Warning: Could not save fixed DisplayIds: {ex.Message}");
-                // Continue anyway - the fix will persist in memory
+                Console.WriteLine($"❌ Could not reorder DisplayIds: {ex.Message}");
             }
         }
 
@@ -504,6 +483,7 @@ namespace SneakerShop.Forms
             }
         }
 
+        // ✅ FIXED: Delete button now properly reorders DisplayIds
         private async void btnDelete_Click(object sender, EventArgs e)
         {
             if (dgvInventory.CurrentRow == null)
@@ -522,6 +502,10 @@ namespace SneakerShop.Forms
                     {
                         await SupabaseClient.Client.From<Sneaker>().Where(s => s.Id == selectedSneaker.Id).Delete();
                         MessageBox.Show("Product deleted successfully!", "Success");
+
+                        // ✅ REORDER ALL DISPLAY IDs AFTER DELETION
+                        await ReorderDisplayIdsAfterDeletion();
+
                         await LoadSneakersAsync();
                         ResetForm();
                     }
